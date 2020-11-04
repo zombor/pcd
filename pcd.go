@@ -202,7 +202,9 @@ func (e *Episode) Download(path string, writer io.Writer) error {
 	fpath := filepath.Join(path, filename)
 
 	if _, err := os.Stat(fpath); !os.IsNotExist(err) {
-		return ErrFilesystemError
+		log.Printf("Episode already exists on filesystem, skipping")
+
+		return nil
 	}
 
 	res, err := http.Get(e.URL)

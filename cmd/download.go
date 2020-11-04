@@ -33,7 +33,9 @@ var downloadCmd = &cobra.Command{
 be obtained by running 'pcd ls <podcast>' For example:
 
 pcd ls gnu_open_world
-pcd download gnu_open_world 1`,
+pcd download gnu_open_world 1
+
+Omitting the episode number will download all episodes`,
 	Args: cobra.MinimumNArgs(1),
 	Run:  download,
 }
@@ -51,50 +53,65 @@ func download(cmd *cobra.Command, args []string) {
 		log.Fatalf("Could not load podcast: %#v", err)
 	}
 
-	var episodeN int
+	var episodes []int = make([]int, 0)
 	if len(args) > 1 {
+		var episodeN int
+
 		episodeN, err = strconv.Atoi(args[1])
-	} else {
-		episodeN = len(podcast.Episodes) // download latest
+
+		episodes = append(episodes, episodeN)
 	}
 	if err != nil {
 		log.Fatalf("Could not parse episode number %s: %#v", args[1], err)
 	}
 
-	if episodeN > len(podcast.Episodes) {
+	var maxEpisode int
+	for i, e := range episodes {
+		if i == 0 || e < maxEpisode {
+			maxEpisode = e
+		}
+	}
+
+	if maxEpisode > len(podcast.Episodes) {
 		log.Fatalf("There's only %d episodes in this podcast.", len(podcast.Episodes))
 	}
 
-	if episodeN < 1 {
-		log.Fatalf("A number from 1 to %d is required.", len(podcast.Episodes))
+	if len(episodes) < 1 {
+		episodes = make([]int, len(podcast.Episodes))
+
+		for i := range episodes {
+			episodes[i] = i
+		}
 	}
 
-	episodeToDownload := podcast.Episodes[episodeN-1]
-	log.Printf("Started downloading: '%s' episode %d of %s", episodeToDownload.Title, episodeN, podcast.Name)
+	for _, episodeN := range episodes {
+		episodeToDownload := podcast.Episodes[episodeN]
+		log.Printf("Started downloading: '%s' episode %d of %s", episodeToDownload.Title, episodeN, podcast.Name)
 
-	// RSS Feeds cannot be trusted to accurately or consistently report the length
-	// of the episode file. Instead, make a request for the header and use the
-	// Content-Length property to get an accurate size.
-	resp, err := http.Head(episodeToDownload.URL)
-	if err != nil {
-		log.Fatalf("Request failed: %s\nError: %#v", episodeToDownload.Title, err)
+		// RSS Feeds cannot be trusted to accurately or consistently report the length
+		// of the episode file. Instead, make a request for the header and use the
+		// Content-Length property to get an accurate size.
+		resp, err := http.Head(episodeToDownload.URL)
+		if err != nil {
+			log.Fatalf("Request failed: %s\nError: %#v", episodeToDownload.Title, err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			log.Fatalf("Request failed: %s\nError: %#v", episodeToDownload.Title, err)
+		}
+		size, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+
+		bar := pb.New(size).SetUnits(pb.U_BYTES)
+		bar.ShowTimeLeft = true
+		bar.ShowSpeed = true
+		bar.Start()
+
+		if err := episodeToDownload.Download(podcast.Path, bar); err != nil {
+			log.Fatalf("Could not download episode: %#v", err)
+		}
+
+		bar.Finish()
 	}
-
-	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("Request failed: %s\nError: %#v", episodeToDownload.Title, err)
-	}
-	size, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-
-	bar := pb.New(size).SetUnits(pb.U_BYTES)
-	bar.ShowTimeLeft = true
-	bar.ShowSpeed = true
-	bar.Start()
-
-	if err := episodeToDownload.Download(podcast.Path, bar); err != nil {
-		log.Fatalf("Could not download episode: %#v", err)
-	}
-
-	bar.Finish()
 }
 
 func init() {
